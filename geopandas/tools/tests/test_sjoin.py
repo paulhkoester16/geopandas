@@ -5,6 +5,7 @@ import shutil
 
 import numpy as np
 import pandas as pd
+import pandas.util.testing as pd_util
 from shapely.geometry import Point
 
 from geopandas import GeoDataFrame, read_file, base
@@ -42,6 +43,20 @@ class TestSpatialJoin(unittest.TestCase):
         res = sjoin(self.polydf, self.pointdf, how="left")
         self.assertEqual(self.polydf.geometry.name, res.geometry.name)
 
+    def test_arbitrary_index(self):
+        # GitHub bug report _____ and pull request ____
+        polydf_indx = ["BoroName", "BoroCode"]
+        self.polydf.set_index(polydf_indx, inplace=True)
+        self.pointdf.index = self.pointdf.index.map(lambda x: "x%s" % x)
+
+        self.assertFalse(isinstance(self.polydf.index[0], int))
+        self.assertFalse(isinstance(self.pointdf.index[0], int))
+        self.assertTrue(set(polydf_indx).isdisjoint(set(self.polydf.columns)))
+
+        res = sjoin(self.polydf, self.pointdf, how="left")
+        expected_cols = set(self.polydf.columns).union(set(self.pointdf.columns))
+        self.assertTrue(expected_cols, set(res.columns))
+
     def test_sjoin_left(self):
         df = sjoin(self.pointdf, self.polydf, how='left')
         self.assertEquals(df.shape, (21,8))
@@ -69,12 +84,12 @@ class TestSpatialJoin(unittest.TestCase):
         # points within polygons
         df = sjoin(self.pointdf, self.polydf, how="left", op="within")
         self.assertEquals(df.shape, (21,8))
-        self.assertEquals(df.ix[1]['BoroName'], 'Staten Island')
+        self.assertEquals(df.iloc[1]['BoroName'], 'Staten Island')
 
         # points contain polygons? never happens so we should have nulls
         df = sjoin(self.pointdf, self.polydf, how="left", op="contains")
         self.assertEquals(df.shape, (21, 8))
-        self.assertTrue(np.isnan(df.ix[1]['Shape_Area']))
+        self.assertTrue(np.isnan(df.iloc[1]['Shape_Area']))
 
     def test_sjoin_bad_op(self):
         # AttributeError: 'Point' object has no attribute 'spandex'
@@ -96,12 +111,31 @@ class TestSpatialJoin(unittest.TestCase):
         self.assertEquals(df.shape, (12,8))
 
     @unittest.skipIf(str(pd.__version__) < LooseVersion('0.17'), pandas_0_16_problem)
-    def test_no_overlapping_geometry(self):
-        # Note: these tests are for correctly returning GeoDataFrame
-        # when result of the join is empty
+    def test_left_sjoin_when_empty(self):
+        # test for correctly returning GeoDataFrame when result of the join is empty
 
-        df_inner = sjoin(self.pointdf.iloc[17:], self.polydf, how='inner')
         df_left = sjoin(self.pointdf.iloc[17:], self.polydf, how='left')
+
+        expected_left_df = pd.concat([self.pointdf.iloc[17:],
+                                      pd.Series(name='index_right', dtype='int64'),
+                                      self.polydf.iloc[:0].drop('geometry', axis=1)], axis = 1)
+        expected_left = GeoDataFrame(expected_left_df, crs = {'init': 'epsg:4326', 'no_defs': True})
+
+        pd_util.assert_frame_equal(expected_left, df_left.reindex(columns=expected_left.columns))
+
+    @unittest.skipIf(str(pd.__version__) < LooseVersion('0.17'), pandas_0_16_problem)
+    def test_inner_sjoin_when_empty(self):
+        df_inner = sjoin(self.pointdf.iloc[17:], self.polydf, how='inner')
+
+        expected_inner_df = pd.concat([self.pointdf.iloc[:0],
+                                       pd.Series(name='index_right', dtype='int64'),
+                                       self.polydf.drop('geometry', axis = 1).iloc[:0]], axis = 1)
+        expected_inner = GeoDataFrame(expected_inner_df, crs = {'init': 'epsg:4326', 'no_defs': True})
+
+        pd_util.assert_frame_equal(expected_inner, df_inner.reindex(columns=expected_inner.columns))
+
+    @unittest.skipIf(str(pd.__version__) < LooseVersion('0.17'), pandas_0_16_problem)
+    def test_right_sjoin_when_empty(self):
         df_right = sjoin(self.pointdf.iloc[17:], self.polydf, how='right')
 
         # Recent Pandas development has introduced a new way of handling merges
@@ -111,28 +145,13 @@ class TestSpatialJoin(unittest.TestCase):
         else:
             right_idxs = pd.Series(name='index_right',dtype='int64')
 
-        expected_inner_df = pd.concat([self.pointdf.iloc[:0],
-                                       pd.Series(name='index_right', dtype='int64'),
-                                       self.polydf.drop('geometry', axis = 1).iloc[:0]], axis = 1)
-
-        expected_inner = GeoDataFrame(expected_inner_df, crs = {'init': 'epsg:4326', 'no_defs': True})
-
         expected_right_df = pd.concat([self.pointdf.drop('geometry', axis = 1).iloc[:0],
                                        pd.concat([pd.Series(name='index_left',dtype='int64'), right_idxs], axis=1),
                                        self.polydf], axis = 1)
-
         expected_right = GeoDataFrame(expected_right_df, crs = {'init': 'epsg:4326', 'no_defs': True})\
                             .set_index('index_right')
 
-        expected_left_df = pd.concat([self.pointdf.iloc[17:],
-                                      pd.Series(name='index_right', dtype='int64'),
-                                      self.polydf.iloc[:0].drop('geometry', axis=1)], axis = 1)
-
-        expected_left = GeoDataFrame(expected_left_df, crs = {'init': 'epsg:4326', 'no_defs': True})
-
-        self.assertTrue(expected_inner.equals(df_inner))
-        self.assertTrue(expected_right.equals(df_right))
-        self.assertTrue(expected_left.equals(df_left))
+        pd_util.assert_frame_equal(expected_right, df_right.reindex(columns=expected_right.columns))
 
     @unittest.skip("Not implemented")
     def test_sjoin_outer(self):

@@ -27,6 +27,8 @@ def sjoin(left_df, right_df, how='inner', op='intersects',
 
     """
     import rtree
+    left_df = left_df.copy()
+    right_df = right_df.copy()
 
     allowed_hows = ['left', 'right', 'inner']
     if how not in allowed_hows:
@@ -38,6 +40,13 @@ def sjoin(left_df, right_df, how='inner', op='intersects',
         raise ValueError("`op` was \"%s\" but is expected to be in %s" % \
             (op, allowed_ops))
 
+    if how == "right":
+        drop_index_name = False
+    elif op == "within":
+        drop_index_name = right_df.index.names == [None]
+    else:
+        drop_index_name = left_df.index.names == [None]
+
     if op == "within":
         # within implemented as the inverse of contains; swap names
         left_df, right_df = right_df, left_df
@@ -45,8 +54,11 @@ def sjoin(left_df, right_df, how='inner', op='intersects',
     if left_df.crs != right_df.crs:
         print('Warning: CRS does not match!')
 
-    l_index = 'index_%s' % lsuffix
-    r_index = 'index_%s' % rsuffix
+    l_index = 'tmp_index_%s' % lsuffix
+    r_index = 'tmp_index_%s' % rsuffix
+
+    r_index_names = _reset_df_index(right_df, suffix='right')
+    l_index_names = _reset_df_index(left_df, suffix='left')
 
     tree_idx = rtree.index.Index()
     right_df_bounds = right_df.geometry.apply(lambda x: x.bounds)
@@ -88,10 +100,7 @@ def sjoin(left_df, right_df, how='inner', op='intersects',
                    )
 
         result.columns = [l_index, r_index, 'match_bool']
-        result = (
-                  pd.DataFrame(result[result['match_bool']==1])
-                  .drop('match_bool', axis=1)
-                  )
+        result = result[result['match_bool']==1].drop('match_bool', axis=1)
 
     else:
         # when output from the join has no overlapping geometries
@@ -100,7 +109,10 @@ def sjoin(left_df, right_df, how='inner', op='intersects',
     if op == "within":
         # within implemented as the inverse of contains; swap names
         left_df, right_df = right_df, left_df
-        result.rename(columns={l_index: r_index, r_index: l_index}, inplace=True)
+        to_rename = {l_index: r_index, r_index: l_index}
+        to_rename.update(dict(zip(l_index_names, r_index_names)))
+        to_rename.update(dict(zip(r_index_names, l_index_names)))
+        result.rename(columns=to_rename, inplace=True)
 
     if how == 'inner' or how == 'left':
         result.set_index(l_index, inplace=True)
@@ -111,6 +123,9 @@ def sjoin(left_df, right_df, how='inner', op='intersects',
                             how=how, left_on=r_index, right_index=True,
                             suffixes=('_%s' % lsuffix, '_%s' % rsuffix))
                 )
+        result.set_index(l_index_names, inplace=True)
+        result.drop(r_index, axis=1, inplace=True)
+
     elif how == 'right':
         result = (
                 left_df.drop(left_df.geometry.name, axis=1)
@@ -119,6 +134,44 @@ def sjoin(left_df, right_df, how='inner', op='intersects',
                                    right_index=True, how=how),
                       left_index=True, right_on=l_index, how=how)
                 )
-        result.set_index(r_index, inplace=True)
+        result.set_index(r_index_names, inplace=True)
+        result.drop([r_index, l_index], axis=1, inplace=True)
 
+    if drop_index_name:
+        result.index.set_names(None, inplace=True)
     return result
+
+def _reset_df_index(pd_df, suffix=''):
+    '''
+    Parameters
+    ----------
+    pd_df : pandas dataframe
+    suffix : string
+        optional suffix to add to index names
+
+    modifies pd_df in place by moving the index columns to df columns,
+    renaming the index columns via the suffix
+
+    Returns list of newly named columns
+    '''
+
+    if pd_df.index.names == [None]:
+        pd_df.index.set_names('index', inplace=True)
+    if suffix != '':
+        suffix = '_%s' % suffix
+
+    index_names = ["%s%s" % (name, suffix) for name in pd_df.index.names]
+    for i, name in enumerate(index_names):
+        new_name = name
+        j = 0
+        while new_name in pd_df.columns:
+            new_name = '%s_%s' % (name, j)
+            j += 1
+        if new_name != name:
+            index_names[i] = new_name
+
+    pd_df.index.set_names(index_names, inplace=True)
+    pd_df.reset_index(inplace=True)
+
+    return index_names
+
