@@ -44,13 +44,13 @@ class TestSpatialJoin(unittest.TestCase):
         self.assertEqual(self.polydf.geometry.name, res.geometry.name)
 
     def test_arbitrary_index(self):
-        # GitHub bug report _____ and pull request ____
+        # relates to bug report 351, 352 and pull request
         polydf_indx = ["BoroName", "BoroCode"]
         self.polydf.set_index(polydf_indx, inplace=True)
         self.pointdf.index = self.pointdf.index.map(lambda x: "x%s" % x)
 
-        self.assertFalse(isinstance(self.polydf.index[0], int))
-        self.assertFalse(isinstance(self.pointdf.index[0], int))
+        self.assertNotIsInstance(self.polydf.index[0], int)
+        self.assertNotIsInstance(self.pointdf.index[0], int)
         self.assertTrue(set(polydf_indx).isdisjoint(set(self.polydf.columns)))
 
         res = sjoin(self.polydf, self.pointdf, how="left")
