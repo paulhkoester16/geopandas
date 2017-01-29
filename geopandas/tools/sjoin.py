@@ -45,6 +45,9 @@ def sjoin(left_df, right_df, how='inner', op='intersects',
     if left_df.crs != right_df.crs:
         print('Warning: CRS does not match!')
 
+    l_index = 'index_%s' % lsuffix
+    r_index = 'index_%s' % rsuffix
+
     tree_idx = rtree.index.Index()
     right_df_bounds = right_df.geometry.apply(lambda x: x.bounds)
     for i in right_df_bounds.index:
@@ -84,7 +87,7 @@ def sjoin(left_df, right_df, how='inner', op='intersects',
                            ]))
                    )
 
-        result.columns = ['index_%s' % lsuffix, 'index_%s' % rsuffix, 'match_bool']
+        result.columns = [l_index, r_index, 'match_bool']
         result = (
                   pd.DataFrame(result[result['match_bool']==1])
                   .drop('match_bool', axis=1)
@@ -92,40 +95,30 @@ def sjoin(left_df, right_df, how='inner', op='intersects',
 
     else:
         # when output from the join has no overlapping geometries
-        result = pd.DataFrame(columns=['index_%s' % lsuffix, 'index_%s' % rsuffix])
+        result = pd.DataFrame(columns=[l_index, r_index])
 
     if op == "within":
         # within implemented as the inverse of contains; swap names
         left_df, right_df = right_df, left_df
-        result = result.rename(columns={
-                    'index_%s' % (lsuffix): 'index_%s' % (rsuffix),
-                    'index_%s' % (rsuffix): 'index_%s' % (lsuffix)})
+        result.rename(columns={l_index: r_index, r_index: l_index}, inplace=True)
 
-    if how == 'inner':
-        result = result.set_index('index_%s' % lsuffix)
-        return (
-                left_df
-                .merge(result, left_index=True, right_index=True)
-                .merge(right_df.drop(right_df.geometry.name, axis=1),
-                    left_on='index_%s' % rsuffix, right_index=True,
-                    suffixes=('_%s' % lsuffix, '_%s' % rsuffix))
-                )
-    elif how == 'left':
-        result = result.set_index('index_%s' % lsuffix)
-        return (
-                left_df
-                .merge(result, left_index=True, right_index=True, how='left')
-                .merge(right_df.drop(right_df.geometry.name, axis=1),
-                    how='left', left_on='index_%s' % rsuffix, right_index=True,
-                    suffixes=('_%s' % lsuffix, '_%s' % rsuffix))
+    if how == 'inner' or how == 'left':
+        result.set_index(l_index, inplace=True)
+        result = left_df.merge(result, left_index=True, right_index=True, how=how)
+        result = (
+                result.merge(
+                            right_df.drop(right_df.geometry.name, axis=1),
+                            how=how, left_on=r_index, right_index=True,
+                            suffixes=('_%s' % lsuffix, '_%s' % rsuffix))
                 )
     elif how == 'right':
-        return (
-                left_df
-                .drop(left_df.geometry.name, axis=1)
-                .merge(result.merge(right_df,
-                    left_on='index_%s' % rsuffix, right_index=True,
-                    how='right'), left_index=True,
-                    right_on='index_%s' % lsuffix, how='right')
-                .set_index('index_%s' % rsuffix)
+        result = (
+                left_df.drop(left_df.geometry.name, axis=1)
+                .merge(result.merge(
+                                   right_df, left_on=r_index,
+                                   right_index=True, how=how),
+                      left_index=True, right_on=l_index, how=how)
                 )
+        result.set_index(r_index, inplace=True)
+
+    return result
