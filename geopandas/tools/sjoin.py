@@ -32,13 +32,13 @@ def sjoin(left_df, right_df, how='inner', op='intersects',
 
     allowed_hows = ['left', 'right', 'inner']
     if how not in allowed_hows:
-        raise ValueError("`how` was \"%s\" but is expected to be in %s" % \
-            (how, allowed_hows))
+        raise ValueError('`how` was "%s" but is expected to be in %s' %
+                         (how, allowed_hows))
 
     allowed_ops = ['contains', 'within', 'intersects']
     if op not in allowed_ops:
-        raise ValueError("`op` was \"%s\" but is expected to be in %s" % \
-            (op, allowed_ops))
+        raise ValueError('`op` was "%s" but is expected to be in %s' %
+                         (op, allowed_ops))
 
     if how == "right":
         drop_index_name = False
@@ -100,7 +100,7 @@ def sjoin(left_df, right_df, how='inner', op='intersects',
                    )
 
         result.columns = [l_index, r_index, 'match_bool']
-        result = result[result['match_bool']==1].drop('match_bool', axis=1)
+        result = result[result['match_bool'] == 1].drop('match_bool', axis=1)
 
     else:
         # when output from the join has no overlapping geometries
@@ -116,7 +116,8 @@ def sjoin(left_df, right_df, how='inner', op='intersects',
 
     if how == 'inner' or how == 'left':
         result.set_index(l_index, inplace=True)
-        result = left_df.merge(result, left_index=True, right_index=True, how=how)
+        result = left_df.merge(result, left_index=True, right_index=True,
+                               how=how)
         result = (
                 result.merge(
                             right_df.drop(right_df.geometry.name, axis=1),
@@ -132,7 +133,7 @@ def sjoin(left_df, right_df, how='inner', op='intersects',
                 .merge(result.merge(
                                    right_df, left_on=r_index,
                                    right_index=True, how=how),
-                      left_index=True, right_on=l_index, how=how)
+                       left_index=True, right_on=l_index, how=how)
                 )
         result.set_index(r_index_names, inplace=True)
         result.drop([r_index, l_index], axis=1, inplace=True)
@@ -140,6 +141,7 @@ def sjoin(left_df, right_df, how='inner', op='intersects',
     if drop_index_name:
         result.index.set_names(None, inplace=True)
     return result
+
 
 def _reset_df_index(pd_df, suffix=''):
     '''
@@ -174,4 +176,3 @@ def _reset_df_index(pd_df, suffix=''):
     pd_df.reset_index(inplace=True)
 
     return index_names
-
