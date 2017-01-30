@@ -57,8 +57,8 @@ def sjoin(left_df, right_df, how='inner', op='intersects',
     l_index = 'tmp_index_%s' % lsuffix
     r_index = 'tmp_index_%s' % rsuffix
 
-    r_index_names = _reset_df_index(right_df, suffix='right')
-    l_index_names = _reset_df_index(left_df, suffix='left')
+    r_index_names = _sjoin_index_helper(right_df, suffix='right')
+    l_index_names = _sjoin_index_helper(left_df, suffix='left')
 
     tree_idx = rtree.index.Index()
     right_df_bounds = right_df.geometry.apply(lambda x: x.bounds)
@@ -124,7 +124,8 @@ def sjoin(left_df, right_df, how='inner', op='intersects',
                 how=how, left_on=r_index, right_index=True,
                 suffixes=('_%s' % lsuffix, '_%s' % rsuffix))
         )
-        result.set_index(l_index_names, inplace=True)
+        result.set_index(l_index_names['new'], inplace=True)
+        result.index.set_names(l_index_names['old'], inplace=True)
         result.drop(r_index, axis=1, inplace=True)
 
     elif how == 'right':
@@ -135,16 +136,32 @@ def sjoin(left_df, right_df, how='inner', op='intersects',
                 right_index=True, how=how),
                 left_index=True, right_on=l_index, how=how)
         )
-        result.set_index(r_index_names, inplace=True)
+        result.set_index(r_index_names['new'], inplace=True)
+        result.index.set_names(r_index_names['old'], inplace=True)
         result.drop([r_index, l_index], axis=1, inplace=True)
+
+    if how == "right" and result.index.names == ["index"]:
+        # include for backward compatibility per test_right_sjoin_when_empty
+        result.index.set_names("index_right", inplace=True)
 
     if drop_index_name:
         result.index.set_names(None, inplace=True)
+
     return result
 
 
-def _reset_df_index(pd_df, suffix=''):
-    '''
+def _sjoin_index_helper(pd_df, suffix=''):
+    '''Helper function for sjoin.
+
+    rtree indices must be integers.  This causes trouble for sjoin
+    when either of the data frames has a complex index.  Current
+    workaround is to reset the indices of the dataframes before
+    creating the rtree.  Doing so requires a bunch of tedious
+    bookkeeping to maintain the original indices so that the
+    joined data frame is returned with the original indices intact.
+
+    Current function exists help with said bookkeeping.
+
     Parameters
     ----------
     pd_df : pandas dataframe
@@ -159,15 +176,15 @@ def _reset_df_index(pd_df, suffix=''):
 
     if pd_df.index.names == [None]:
         pd_df.index.set_names('index', inplace=True)
-    if suffix != '':
-        suffix = '_%s' % suffix
+    suffix = '_%s' % suffix
 
+    index_names_old = pd_df.index.names
     index_names = ["%s%s" % (name, suffix) for name in pd_df.index.names]
     for i, name in enumerate(index_names):
         new_name = name
         j = 0
         while new_name in pd_df.columns:
-            new_name = '%s_%s' % (name, j)
+            new_name = '%s%s' % (name, j)
             j += 1
         if new_name != name:
             index_names[i] = new_name
@@ -175,4 +192,4 @@ def _reset_df_index(pd_df, suffix=''):
     pd_df.index.set_names(index_names, inplace=True)
     pd_df.reset_index(inplace=True)
 
-    return index_names
+    return {'old':index_names_old, 'new':index_names}

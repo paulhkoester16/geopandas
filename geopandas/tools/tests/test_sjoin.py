@@ -49,7 +49,7 @@ class TestSpatialJoin(unittest.TestCase):
         res = sjoin(self.polydf, self.pointdf, how="left")
         self.assertEqual(self.polydf.geometry.name, res.geometry.name)
 
-    def test_arbitrary_index(self):
+    def test_sjoin_when_dfs_have_complex_indexes(self):
         # relates to bug report 351, 352 and pull request
         polydf_indx = ["BoroName", "BoroCode"]
         self.polydf.set_index(polydf_indx, inplace=True)
@@ -63,6 +63,14 @@ class TestSpatialJoin(unittest.TestCase):
         expected_cols = (
             set(self.polydf.columns).union(set(self.pointdf.columns)))
         self.assertTrue(expected_cols, set(res.columns))
+
+    def test_index_name_conflicts_with_column_name(self):
+        self.polydf.index.set_names("BoroName", inplace=True)
+        res = sjoin(self.polydf, self.pointdf, how="left")
+        expected_cols = (
+            set(self.polydf.columns).union(set(self.pointdf.columns)))
+        self.assertTrue(expected_cols, set(res.columns))
+
 
     def test_sjoin_left(self):
         df = sjoin(self.pointdf, self.polydf, how='left')
@@ -147,13 +155,7 @@ class TestSpatialJoin(unittest.TestCase):
                      pandas_0_16_problem)
     def test_right_sjoin_when_empty(self):
 
-        # Recent Pandas development has introduced a new way of handling merges
-        # this change has altered the output when no overlapping geometries
-        if str(pd.__version__) > LooseVersion('0.18.1'):
-            right_idxs = pd.Series(range(0, 5), name='index_right',
-                                   dtype='int64')
-        else:
-            right_idxs = pd.Series(name='index_right', dtype='int64')
+        right_idxs = pd.Series(range(0, 5), name='index_right', dtype='int64')
         to_concat = [
             self.pointdf.drop('geometry', axis=1).iloc[:0],
             pd.Series(name='index_left', dtype='int64'),
